@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/alfreddobradi/lists-n-chitz/internal/auth"
+	"github.com/alfreddobradi/lists-n-chitz/internal/link"
 	"github.com/alfreddobradi/lists-n-chitz/internal/logger"
 	"github.com/zenazn/goji"
 )
@@ -104,7 +105,54 @@ func login(w http.ResponseWriter, r *http.Request) {
 }
 
 func save(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "STUB\n")
+	address := getAddress(r)
+	token := r.Header.Get("Authorization")
+
+	user, err := auth.Authorize(address, token)
+	if err != nil {
+		log.Warningf("server: authorize: %+v", err)
+
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, "401 - Unathorized")
+
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	var data link.Link
+	err = decoder.Decode(&data)
+	if err != nil {
+		log.Warningf("server: json: %+v", err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "500 - Internal Server Error")
+
+		return
+	}
+
+	data.UserID = user.ID
+
+	data, err = link.Save(data)
+	if err != nil {
+		log.Warningf("server: json: %+v", err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "500 - Internal Server Error")
+
+		return
+	}
+
+	response, err := json.Marshal(data)
+	if err != nil {
+		log.Warningf("server: json: %+v", err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "500 - Internal Server Error")
+
+		return
+	}
+	log.Debugf("%+v", response)
+	fmt.Fprintf(w, "%s", response)
 }
 
 func getAddress(r *http.Request) (address string) {

@@ -4,18 +4,17 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/alfreddobradi/lists-n-chitz/internal/database"
 )
 
 type User struct {
-	ID        uint   `json:"id"`
-	Status    uint   `json:"status"`
-	CreatedAt int64  `json:"created_at"`
-	Email     string `json:"email"`
-	Password  string `json:"password"`
+	ID        uint   `json:"id" db:"id"`
+	Status    uint   `json:"status" db:"status"`
+	CreatedAt int64  `json:"created_at" db:"created_at"`
+	Email     string `json:"email" db:"email"`
+	Password  string `json:"password" db:"password"`
 }
 
 type UserResponse struct {
@@ -110,6 +109,43 @@ func Authenticate(u User, address string) (Token, error) {
 	return t, err
 }
 
+func Authorize(address, token string) (u User, err error) {
+	db, err := database.New("postgres://postgres@localhost:5432/lists?sslmode=disable")
+	if err != nil {
+		return
+	}
+
+	query := "SELECT u.* FROM user_tokens ut LEFT JOIN users u ON ut.iduser = u.id WHERE token = $1 AND address = $2 AND u.status = 1 AND NOW() <= expires LIMIT 1"
+	res := db.QueryRowx(query, token, address)
+	if res.Err() != nil {
+		return
+	}
+
+	var cols struct {
+		ID        uint   `db:"id"`
+		Email     string `db:"email"`
+		Status    uint   `db:"status"`
+		Password  string `db:"password"`
+		CreatedAt string `db:"created_at"`
+	}
+	err = res.StructScan(&cols)
+	if err != nil {
+		return
+	}
+
+	t, err := time.Parse(time.RFC3339, cols.CreatedAt)
+	if err != nil {
+		return
+	}
+
+	u.Email = cols.Email
+	u.ID = cols.ID
+	u.Status = cols.Status
+	u.CreatedAt = t.Unix()
+
+	return
+}
+
 func createToken(t Token) (Token, error) {
 	db, err := database.New("postgres://postgres@localhost:5432/lists?sslmode=disable")
 	if err != nil {
@@ -120,7 +156,7 @@ func createToken(t Token) (Token, error) {
 	query := "SELECT token FROM user_tokens WHERE iduser = $1 AND address = $2 AND NOW() <= expires"
 	res, err := db.Query(query, t.userID, t.address)
 	if err != nil {
-		return t, errors.New("sql error")
+		return t, err
 	}
 	var tTmp string
 	var i uint
@@ -128,7 +164,7 @@ func createToken(t Token) (Token, error) {
 		i = i + 1
 		res.Scan(&tTmp)
 	}
-	log.Printf("%d", i)
+
 	expires := time.Now().Add(30 * time.Minute)
 	t.Expires = expires.Unix()
 	expiresTimestamp := expires.Format(time.RFC3339Nano)
